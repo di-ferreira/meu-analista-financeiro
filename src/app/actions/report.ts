@@ -1,6 +1,9 @@
 'use server';
 
+import { auth } from '@/auth';
 import { db } from '@/db';
+import { transactions } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 import { OpenAI } from 'openai';
 
 const ollama = new OpenAI({
@@ -13,10 +16,15 @@ const ollama = new OpenAI({
 });
 
 export async function generateFinancialReport() {
-  // 1. Buscar dados do SQLite
-  const allTransactions = await db.query.transactions.findMany();
+ const session = await auth()
+  if (!session?.user?.id) return null
 
-  const summary = allTransactions.reduce(
+  // Filtra as transações apenas deste utilizador
+  const userTransactions = await db.select()
+    .from(transactions)
+    .where(eq(transactions.userId, session.user.id))
+
+  const summary = userTransactions.reduce(
     (acc, curr) => {
       if (curr.type === 'income') acc.incomes += curr.amount;
       else acc.expenses += Math.abs(curr.amount);
@@ -42,7 +50,7 @@ export async function generateFinancialReport() {
           summary.expenses
         }, Saldo R$ ${balance}. 
         Liste as 3 transações mais relevantes: ${JSON.stringify(
-          allTransactions.slice(0, 5)
+          userTransactions.slice(0, 5)
         )}`,
       },
     ],

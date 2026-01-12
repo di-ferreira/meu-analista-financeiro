@@ -1,5 +1,6 @@
 'use server';
 
+import { auth } from '@/auth';
 import { db } from '@/db';
 import { transactions, uploads } from '@/db/schema';
 import { parse } from 'csv-parse/sync';
@@ -7,13 +8,12 @@ import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'node:crypto';
 import { OpenAI } from 'openai';
 
-// Configuração do Ollama compatível com OpenAI
 const ollama = new OpenAI({
   baseURL: `${process.env.IA_URL}`,
   apiKey: `${process.env.IA_API_KEY}`,
   defaultHeaders: {
-    'HTTP-Referer': 'http://localhost:3000', // Opcional para o ranking do OpenRouter
-    'X-Title': 'Meu Analista Financeiro', // Opcional
+    'HTTP-Referer': 'http://localhost:3000',
+    'X-Title': 'Meu Analista Financeiro',
   },
 });
 
@@ -23,6 +23,14 @@ interface CsvRow {
 
 export async function uploadAndAnalyzeAction(formData: FormData) {
   try {
+    // 1. Verificar a sessão e obter o ID do utilizador
+    const session = await auth();
+    if (!session?.user?.id) {
+      throw new Error("Não autorizado: Usuário não encontrado na sessão.");
+    }
+
+    const userId = session.user.id;
+
     const file = formData.get('file') as File;
     if (!file || file.size === 0) {
       throw new Error('Arquivo não enviado ou está vazio.');
@@ -32,34 +40,31 @@ export async function uploadAndAnalyzeAction(formData: FormData) {
     const firstLine = csvContent.split('\n')[0];
     const delimiter = firstLine.includes(';') ? ';' : ',';
 
-    // 1. Amostragem para a IA (limitado a 3 linhas para não estourar o contexto)
+    // 2. Amostragem para a IA
     const sampleRecords = parse(csvContent, {
       columns: false,
-      to_line: 4, // Cabeçalho + 3 linhas
+      to_line: 4,
       delimiter: delimiter,
     }) as string[][];
 
     const sampleText = JSON.stringify(sampleRecords);
 
-    // 2. IA Mapper: Identificar colunas dinamicamente
+    // 3. IA Mapper
     const mappingResponse = await ollama.chat.completions.create({
       model: `${process.env.IA_MODEL}`,
       messages: [
         {
           role: 'system',
-          content: `Você é um especialista em dados. O usuário enviará uma amostra de CSV. 
-          Identifique quais colunas representam: "date" (data), "description" (descrição do gasto/ganho) e "amount" (valor financeiro).
-          Responda APENAS um JSON puro no formato: {"date": "nome_coluna", "description": "nome_coluna", "amount": "nome_coluna"}`,
+          content: `Você é um especialista em dados. Identifique as colunas: "date", "description" e "amount". Responda APENAS JSON: {"date": "col", "description": "col", "amount": "col"}`,
         },
-        { role: 'user', content: `Amostra do CSV: ${sampleText}` },
+        { role: 'user', content: `Amostra: ${sampleText}` },
       ],
       response_format: { type: 'json_object' },
     });
 
-    const rawContent = mappingResponse.choices[0].message.content || '{}';
-    const mapping = JSON.parse(rawContent);
+    const mapping = JSON.parse(mappingResponse.choices[0].message.content || '{}');
 
-    // 3. Processar CSV completo
+    // 4. Processar CSV completo
     const allRecords = parse(csvContent, {
       columns: true,
       skip_empty_lines: true,
@@ -67,48 +72,44 @@ export async function uploadAndAnalyzeAction(formData: FormData) {
       delimiter: delimiter,
     }) as CsvRow[];
 
-    // 4. Persistência no SQLite
+    // 5. Persistência do Registro de Upload vinculado ao utilizador
     const [newUpload] = await db
       .insert(uploads)
       .values({
+        id: randomUUID(), // Garante ID se o schema não auto-gerar
+        userId: userId,   // VÍNCULO COM O UTILIZADOR
         fileName: file.name,
         status: 'completed',
       })
       .returning();
 
-    // Inserção em massa (Batch Insert) é mais eficiente
+    // 6. Preparar transações vinculadas ao utilizador e ao upload
     const dataToInsert = allRecords
       .map((row) => {
-        // 1. Limpeza do Valor (Trata 1.500,00 ou 1500.00)
+        // Limpeza do Valor
         let rawAmount = row[mapping.amount] || '0';
-        // Remove R$, espaços e pontos de milhar, troca vírgula por ponto
         const cleanAmountStr = rawAmount
           .replace(/R\$/g, '')
           .replace(/\s/g, '')
-          .replace(/\.(?=[^,]*$)/g, '') // Remove ponto se houver vírgula depois
+          .replace(/\.(?=[^,]*$)/g, '')
           .replace(',', '.');
-
         const cleanAmount = parseFloat(cleanAmountStr);
 
-        // 2. Tratamento de Data (DD/MM/YYYY para YYYY-MM-DD)
+        // Tratamento de Data
         const rawDate = row[mapping.date];
         let finalDate: Date;
-
         if (rawDate.includes('/')) {
           const [day, month, year] = rawDate.split('/');
-          finalDate = new Date(`${year}-${month}-${day}T12:00:00`); // T12:00 evita problemas de fuso
+          finalDate = new Date(`${year}-${month}-${day}T12:00:00`);
         } else {
           finalDate = new Date(rawDate);
         }
 
-        // 3. Validação final
-        if (isNaN(finalDate.getTime()) || isNaN(cleanAmount)) {
-          console.warn('Linha ignorada por dados inválidos:', row);
-          return null;
-        }
+        if (isNaN(finalDate.getTime()) || isNaN(cleanAmount)) return null;
 
         return {
-          id: randomUUID(), // Garante um ID único para cada transação
+          id: randomUUID(),
+          userId: userId,      // VÍNCULO COM O UTILIZADOR
           uploadId: newUpload.id,
           date: finalDate,
           description: row[mapping.description] || 'Sem descrição',
@@ -118,15 +119,14 @@ export async function uploadAndAnalyzeAction(formData: FormData) {
       })
       .filter((item) => item !== null) as any[];
 
-    // Insere todos de uma vez
+    // 7. Inserção em massa
     if (dataToInsert.length > 0) {
       await db.insert(transactions).values(dataToInsert);
     }
 
-    // Atualiza a interface do Next.js
     revalidatePath('/');
+    return { success: true, uploadId: newUpload.id };
 
-    return { success: true, uploadId: newUpload.id, mapping };
   } catch (error) {
     console.error('Erro na Action analyze:', error);
     return {
@@ -135,4 +135,3 @@ export async function uploadAndAnalyzeAction(formData: FormData) {
     };
   }
 }
-
