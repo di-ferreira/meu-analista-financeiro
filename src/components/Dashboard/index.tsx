@@ -1,6 +1,6 @@
 'use client';
 
-import { generateFinancialReport } from '@/app/actions/report';
+import { getFinancialSummary } from '@/app/actions/report';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -18,7 +18,7 @@ export function Dashboard() {
 
   async function handleGenerateReport() {
     setLoading(true);
-    const result = await generateFinancialReport();
+    const result = await getFinancialSummary();
     setData(result);
     setLoading(false);
   }

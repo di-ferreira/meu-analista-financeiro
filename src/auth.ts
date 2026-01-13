@@ -20,8 +20,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const isMatch = await bcrypt.compare(credentials.password as string, user.password);
 
-        return isMatch ? user : null;
+        if (!isMatch) return null;
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+        };
       },
     }),
   ],
+  callbacks: {
+    // 1. Persiste o ID do usuário no Token JWT
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+      }
+      return token;
+    },
+    // 2. Passa o ID do Token para a Sessão acessível no App
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.id = token.id as string;
+      }
+      return session;
+    },
+  },
 });

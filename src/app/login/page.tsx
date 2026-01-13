@@ -10,12 +10,14 @@ import { Button } from "@/components/ui/button";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const successMsg = searchParams.get("success");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setLoading(true);
     setError(null);
 
     const formData = new FormData(e.currentTarget);
@@ -34,6 +36,7 @@ export default function LoginPage() {
       router.push("/");
       router.refresh();
     }
+    setLoading(false);
   }
 
   return (
@@ -49,8 +52,8 @@ export default function LoginPage() {
           <Input placeholder="E-mail" name="email" type="email" required />
           <Input placeholder="Password" name="password" type="password" required />
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <Button type="submit" className="cursor-pointer">
-            Entrar
+          <Button type="submit" disabled={loading} className="cursor-pointer">
+            {loading ? "Processando..." : "Entrar"}
           </Button>
         </form>
         <CardFooter>

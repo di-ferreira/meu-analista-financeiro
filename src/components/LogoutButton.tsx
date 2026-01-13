@@ -6,7 +6,7 @@ export function LogoutButton() {
         <form action={logoutAction}>
             <button
                 type="submit"
-                className="text-sm font-medium text-red-600 hover:text-red-800 transition-colors"
+                className="text-sm font-medium text-red-600 hover:text-red-800 transition-colors cursor-pointer"
             >
                 Sair da conta
             </button>
