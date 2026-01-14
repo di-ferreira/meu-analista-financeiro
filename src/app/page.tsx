@@ -1,67 +1,79 @@
 import { auth } from "@/auth";
+import { db } from "@/db";
+import { transactions } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { getFinancialSummary } from "@/app/actions/report";
-import { logoutAction } from "@/app/actions/logout"; // Crie uma simples para signOut()
+import { logoutAction } from "@/app/actions/logout";
+import { UploadButton } from "@/components/UploadButton";
 
 export default async function DashboardPage() {
   const session = await auth();
-  const report = await getFinancialSummary();
+  const userId = session?.user?.id;
+
+  if (!userId) return null;
+
+  const dataCount = db
+    .select({ value: sql<number>`count(*)` })
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+    .get();
+
+  const hasData = (dataCount?.value || 0) > 0;
 
   return (
-    <main className="p-8 max-w-4xl mx-auto space-y-6">
+    <main className="p-8 max-w-4xl mx-auto space-y-8">
       <header className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Olá, {session?.user?.name}</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Olá, {session?.user?.name}</h1>
+          <p className="text-sm text-gray-500">Bem-vindo ao seu Analista Financeiro.</p>
+        </div>
         <form action={logoutAction}>
-          <button className="text-sm text-red-600 border border-red-600 px-3 py-1 rounded">Sair</button>
+          <button className="text-sm text-red-600 border border-red-600 px-3 py-1 rounded hover:bg-red-50">
+            Sair
+          </button>
         </form>
       </header>
 
-      {/* Cards de Resumo */}
+      {!hasData ? (
+        <div className="text-center py-20 border-2 border-dashed rounded-xl space-y-4">
+          <div className="text-4xl">📊</div>
+          <h2 className="text-xl font-semibold">Nenhum dado encontrado</h2>
+          <p className="text-gray-500">Faça upload de um arquivo CSV para começar a análise.</p>
+          <div className="flex justify-center">
+            <UploadButton />
+          </div>
+        </div>
+      ) : (
+        <DashboardContent />
+      )}
+    </main>
+  );
+}
+
+async function DashboardContent() {
+  const report = await getFinancialSummary();
+
+  return (
+    <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-sm text-green-700">Entradas</p>
-          <p className="text-xl font-bold text-green-900">R$ {report.summary.income.toFixed(2)}</p>
+        <div className="p-4 bg-green-50 rounded-lg">
+          <p className="text-sm text-green-700 font-medium">Entradas</p>
+          <p className="text-2xl font-bold">R$ {report.summary.income.toFixed(2)}</p>
         </div>
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-700">Saídas</p>
-          <p className="text-xl font-bold text-red-900">R$ {report.summary.expense.toFixed(2)}</p>
+        <div className="p-4 bg-red-50 rounded-lg">
+          <p className="text-sm text-red-700 font-medium">Saídas</p>
+          <p className="text-2xl font-bold">R$ {report.summary.expense.toFixed(2)}</p>
         </div>
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-sm text-blue-700">Saldo Geral</p>
-          <p className="text-xl font-bold text-blue-900">R$ {report.summary.balance.toFixed(2)}</p>
+        <div className="p-4 bg-blue-50 rounded-lg">
+          <p className="text-sm text-blue-700 font-medium">Saldo</p>
+          <p className="text-2xl font-bold">R$ {report.summary.balance.toFixed(2)}</p>
         </div>
       </div>
 
-      {/* Insight da IA */}
-      <section className="p-6 bg-slate-900 text-slate-100 rounded-xl shadow-inner">
-        <h3 className="text-blue-400 font-semibold mb-2 flex items-center gap-2">
-          ✨ Insight do Analista IA
-        </h3>
-        <p className="italic text-lg">"{report.insight}"</p>
-      </section>
-
-      {/* Tabela de Transações */}
-      <section className="bg-white border rounded-lg overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-gray-50 border-b">
-            <tr>
-              <th className="p-4">Data</th>
-              <th className="p-4">Descrição</th>
-              <th className="p-4 text-right">Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.latestTransactions.map(tx => (
-              <tr key={tx.id} className="border-b">
-                <td className="p-4 text-sm">{new Date(tx.date).toLocaleDateString()}</td>
-                <td className="p-4">{tx.description}</td>
-                <td className={`p-4 text-right font-medium ${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  R$ {tx.amount.toFixed(2)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-    </main>
+      <div className="p-6 bg-gray-900 text-white rounded-xl">
+        <h3 className="text-blue-400 font-bold mb-2">Insight da IA</h3>
+        <p className="leading-relaxed">{report.insight}</p>
+      </div>
+    </div>
   );
 }
