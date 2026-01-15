@@ -50,48 +50,67 @@ export async function uploadAndAnalyzeAction(formData: FormData) {
       delimiter
     });
 
-    // 3. Transação (Removido o async de dentro do tx)
-    // Para o better-sqlite3, fazemos o processamento pesado fora e apenas a inserção dentro
     const dataToInsert: any[] = [];
 
-    // Preparamos os dados antes da transação
-    allRecords.forEach((row) => {
-      const rawAmount = row[mapping.amount]?.replace(/R\$/g, "").replace(/\s/g, "").replace(",", ".") || "0";
+    allRecords.forEach((row, index) => {
+      // 1. Limpeza do valor (Amount)
+      const rawAmount = row[mapping.amount]?.toString()
+        .replace(/R\$/g, "")
+        .replace(/\s/g, "")
+        .replace(",", ".") || "0";
       const cleanAmount = parseFloat(rawAmount);
 
-      const rawDate = row[mapping.date];
-      const dateParts = rawDate?.includes("/") ? rawDate.split("/") : null;
-      const finalDate = dateParts ? new Date(`${dateParts[2]}-${dateParts[1]}-${dateParts[0]}T12:00:00`) : new Date(rawDate);
+      // 2. Tratamento robusto de Data
+      const rawDate = row[mapping.date]?.toString().trim();
+      let finalDate: Date | null = null;
+
+      if (rawDate) {
+        // Tenta formato DD/MM/YYYY ou DD-MM-YYYY
+        if (rawDate.includes("/") || rawDate.includes("-")) {
+          const separator = rawDate.includes("/") ? "/" : "-";
+          const parts = rawDate.split(separator);
+          if (parts.length === 3) {
+            // Assume DD/MM/YYYY
+            const day = parseInt(parts[0]);
+            const month = parseInt(parts[1]) - 1; // Meses no JS são 0-11
+            const year = parts[2].length === 2 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
+            finalDate = new Date(year, month, day, 12, 0, 0);
+          }
+        } else {
+          // Tenta fallback para datas padrão ISO
+          finalDate = new Date(rawDate);
+        }
+      }
+
+      // 3. Validação Crucial: Se a data for inválida, ignoramos a linha ou usamos HOJE
+      // Aqui evitamos o erro de NOT NULL constraint do SQLite
+      if (!finalDate || isNaN(finalDate.getTime())) {
+        console.warn(`Linha ${index} ignorada: Data inválida (${rawDate})`);
+        return; // Pula esta linha
+      }
 
       dataToInsert.push({
         userId: session.user?.id,
-        date: finalDate,
-        description: row[mapping.description] || "Sem descrição",
+        date: finalDate, // Agora garantidamente não é nulo
+        description: row[mapping.description]?.toString().substring(0, 255) || "Sem descrição",
         amount: cleanAmount,
         type: cleanAmount >= 0 ? "income" : "expense",
       });
     });
 
-    // Execução da transação síncrona do Drizzle com better-sqlite3
+    if (dataToInsert.length === 0) {
+      return { success: false, error: "Nenhuma transação válida encontrada no arquivo." };
+    }
+
+    // 4. Inserção no Banco
     db.transaction((tx) => {
-      // .get() executa a query e retorna o primeiro objeto encontrado
       const newUpload = tx.insert(uploads).values({
         userId: session.user?.id!,
         fileName: file.name,
-      }).returning().get(); // Alterado de [newUpload] para .get()
+      }).returning().get();
 
-      if (!newUpload) {
-        throw new Error("Falha ao criar registro de upload.");
-      }
-
-      // Agora vinculamos as transações ao ID gerado
-      const finalTransactions = dataToInsert.map(t => ({
-        ...t,
-        uploadId: newUpload.id
-      }));
-
-      if (finalTransactions.length > 0) {
-        // .run() é usado para inserções em massa que não precisam de retorno
+      if (newUpload) {
+        const finalTransactions = dataToInsert.map(t => ({ ...t, uploadId: newUpload.id }));
         tx.insert(transactions).values(finalTransactions).run();
       }
     });
