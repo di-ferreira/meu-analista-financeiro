@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { logoutAction } from "@/app/actions/logout";
 import { UploadButton } from "@/components/UploadButton";
 import { getFinancialSummary } from "@/app/actions/report";
+import { FormatToCurrency } from "@/lib/utils";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -21,7 +22,6 @@ export default async function DashboardPage() {
     .get();
 
   const hasData = (dataCount?.value || 0) > 0;
-
   return (
     <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       {/* HEADER: Sempre visível */}
@@ -119,7 +119,7 @@ async function DashboardContent() {
                   <td className="p-4 text-gray-600">{new Date(tx.date).toLocaleDateString('pt-BR')}</td>
                   <td className="p-4 font-medium">{tx.description}</td>
                   <td className={`p-4 text-right font-bold ${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {tx.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    {FormatToCurrency(tx.amount)}
                   </td>
                 </tr>
               ))}
@@ -136,7 +136,7 @@ function Card({ title, value, color, bg }: any) {
     <div className={`p-6 ${bg} rounded-2xl border border-white/50 shadow-sm`}>
       <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">{title}</p>
       <p className={`text-2xl font-black ${color}`}>
-        {value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+        {FormatToCurrency(value)}
       </p>
     </div>
   );
