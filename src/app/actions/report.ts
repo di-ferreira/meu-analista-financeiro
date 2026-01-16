@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { transactions } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { FormatToCurrency } from "@/lib/utils";
-import { callIA } from "@/services/apiIA";
+import { callIA, iMessage } from "@/services/apiIA";
 
 export async function getFinancialSummary() {
   try {
@@ -57,8 +57,12 @@ export async function getFinancialSummary() {
       Com base nisso, forneça um diagnóstico detalhado da saúde financeira dele e 3 sugestões práticas para melhorar o saldo no próximo mês.
     `;
     try {
-      const responseIA = await callIA(prompt);
-      console.log('responseIA', responseIA);
+      const messages: iMessage[] = [
+        { role: "system", content: "Você é um analista financeiro. Responda em português." },
+        { role: "user", content: prompt }
+      ];
+      const responseIA = await callIA(messages);
+      console.log('responseIA report', responseIA);
       if (responseIA) {
         insight = responseIA.trim() || insight;
       }

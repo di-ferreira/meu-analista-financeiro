@@ -22,9 +22,14 @@ interface OllamaChatResponse {
 // Opcional: Interface para o payload que você envia
 interface OllamaChatPayload {
   model: string;
-  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  messages: iMessage[];
   stream: boolean;
   temperature: number;
+}
+
+export interface iMessage {
+  role: string;
+  content: string;
 }
 
 /**
@@ -32,14 +37,21 @@ interface OllamaChatPayload {
  * @param prompt O texto a ser analisado pela IA.
  * @returns Uma Promise contendo o texto gerado pela IA.
  */
-export async function callIA(prompt: string): Promise<string> {
+export async function callIA(messages: iMessage[]): Promise<string> {
   const baseUrl = process.env.IA_URL?.replace(/\/$/, "");
   const url = `${baseUrl}/api/chat`;
 
   // 1. Criamos um controlador para aumentar o tempo de espera
   // 300.000ms = 5 minutos (dando tempo de sobra para a IA local pensar)
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 300000);
+  const timeoutId = setTimeout(() => controller.abort(), 600000);
+
+  const payload: OllamaChatPayload = {
+    model: process.env.IA_MODEL || "llama3.1:8b",
+    messages: messages,
+    stream: false,
+    temperature: 0.7,
+  };
 
   try {
     const response = await fetch(url, {
@@ -47,18 +59,11 @@ export async function callIA(prompt: string): Promise<string> {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: process.env.IA_MODEL || "llama3.1:8b",
-        messages: [
-          { role: "system", content: "Você é um analista financeiro. Responda em português." },
-          { role: "user", content: prompt }
-        ],
-        stream: false,
-      }),
-      signal: controller.signal, // Vinculamos o timeout aqui
+      body: JSON.stringify(payload),
+      signal: controller.signal,
     });
 
-    clearTimeout(timeoutId); // Limpamos o timeout se a resposta chegar antes
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
